@@ -26,6 +26,9 @@ public class SwitchLimiterTest
 	}
 	
 	@Test
+	/**
+	 * Test that, with both limit switches inactive, the limit is not activated
+	 */
 	public void testBasic()
 	{
 		minSwitch.state = false;
@@ -36,6 +39,9 @@ public class SwitchLimiterTest
 	}
 	
 	@Test
+	/**
+	 * Test that the minimum limit switch works
+	 */
 	public void testMinLimit()
 	{
 		minSwitch.state = true;
@@ -46,6 +52,9 @@ public class SwitchLimiterTest
 	}
 	
 	@Test
+	/**
+	 * Test that the maximum limit switch works
+	 */
 	public void testMaxLimit()
 	{
 		minSwitch.state = false;
