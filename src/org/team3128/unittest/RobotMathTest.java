@@ -35,6 +35,23 @@ public class RobotMathTest
 	   }
 	   
 	   @Test
+	   /**
+	    * Test the non-throwing cases
+	    */
+	   public void testCeilDoubleIntCorrect() 
+	   {
+	       assertEquals(75, RobotMath.ceil_double_int(74.4793)); 
+	       assertEquals(-9, RobotMath.ceil_double_int(-9.3));
+	       assertEquals(0, RobotMath.ceil_double_int(-0.894));
+	   }
+	   
+	   @Test(expected=IllegalArgumentException.class)
+	   public void testCeilDoubleIntError() 
+	   {
+	       RobotMath.ceil_double_int(4.1e9);
+	   }
+	   
+	   @Test
 	   public void testGetMotorDirToTarget() 
 	   {
 		   //test basic functionality
