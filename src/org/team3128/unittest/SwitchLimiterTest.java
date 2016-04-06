@@ -4,7 +4,7 @@ import static org.junit.Assert.assertEquals;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.team3128.hardware.motor.limiter.SwitchLimiter;
+import org.team3128.common.hardware.motor.limiter.SwitchLimiter;
 
 import frctest.mock.MockDigitalInput;
 

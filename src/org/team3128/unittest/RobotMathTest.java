@@ -2,9 +2,9 @@ package org.team3128.unittest;
 import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
-import org.team3128.Log;
-import org.team3128.util.MotorDir;
-import org.team3128.util.RobotMath;
+import org.team3128.common.util.Log;
+import org.team3128.common.util.RobotMath;
+import org.team3128.common.util.enums.MotorDir;
 
 /**
  * This class tests the functions of RobotMath.

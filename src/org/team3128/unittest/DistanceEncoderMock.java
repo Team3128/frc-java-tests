@@ -1,7 +1,7 @@
 package org.team3128.unittest;
 
 import org.junit.Ignore;
-import org.team3128.hardware.encoder.distance.IDistanceEncoder;
+import org.team3128.common.hardware.encoder.distance.IDistanceEncoder;
 
 @Ignore
 public class DistanceEncoderMock implements IDistanceEncoder

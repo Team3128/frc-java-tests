@@ -1,11 +1,9 @@
 package org.team3128.unittest;
 
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -20,13 +18,12 @@ import javax.swing.JPanel;
 
 import org.junit.Ignore;
 import org.junit.Test;
-import org.team3128.Log;
-import org.team3128.drive.SwerveDrive2;
-import org.team3128.hardware.motor.MotorGroup;
-import org.team3128.listener.ListenerManager;
-import org.team3128.listener.controller.ControllerSimXbox;
-import org.team3128.util.RobotMath;
-import org.team3128.util.Units;
+import org.team3128.common.drive.SwerveDrive2;
+import org.team3128.common.hardware.motor.MotorGroup;
+import org.team3128.common.listener.ListenerManager;
+import org.team3128.common.listener.controller.ControllerSimXbox;
+import org.team3128.common.util.RobotMath;
+import org.team3128.common.util.units.Length;
 
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.Joystick;
@@ -51,8 +48,8 @@ public class SwerveDrive2Test
 		
 		double driveWheelForce = 0; //in N
 		
-		//degree offset from straight ahead
-		double simulatedHeadingDegrees = 0;
+		//90 degrees is straight ahead
+		double simulatedAngleDegrees = 0;
 		
 		double wheelbaseAngle;
 		
@@ -78,7 +75,7 @@ public class SwerveDrive2Test
 			drive.addModule(new MotorGroup(turnMotor), new MotorGroup(driveMotor), fakeEncoder, homingSwitch, 0, angle, 0, kP, kI, kD);
 		}
 		
-		private static final double WHEEL_CIRCUMFERENCE = 5 * Units.cm * Math.PI;
+		private static final double WHEEL_CIRCUMFERENCE = 5 * Length.cm * Math.PI;
 		
 		private static final double TURNING_MOTOR_SPEED_DPS = 180; //degrees per second
 		
@@ -93,11 +90,11 @@ public class SwerveDrive2Test
 			
 			double distanceTurned = turningAngularSpeed * (((double)millisecondsBetweenUpdates) / 1000);
 			
-			simulatedHeadingDegrees += distanceTurned;
+			simulatedAngleDegrees += distanceTurned;
 			
 			fakeEncoder.distanceInDegrees += distanceTurned;
 			
-			if(Math.abs(simulatedHeadingDegrees) < 1)
+			if(Math.abs(simulatedAngleDegrees - 90) < 1)
 			{
 				homingSwitch.state = true;
 			}
@@ -112,7 +109,10 @@ public class SwerveDrive2Test
 	final static double kP = .1, kI = 0, kD = 0;
 	final static double ROBOT_MASS_KG = 100;
 	final static double DRIVE_MOTOR_FORCE = 200; //N
-	final static double COEFFICIENT_OF_FRICTION = 50; // N/(m/s)
+	final static double INTERNAL_FRICTION = 50; // N/(m/s)^2
+	final static double INTERNAL_ROTATIONAL_FRICTION = 3; // Nm/(deg/s)^2
+	final static double WHEEL_NON_TURNING_FRICTION_FACTOR = 50; // ratio of frictional force to speed when a wheel is being pushed sideways (N/(m/s))
+
 	
 	SwerveDrive2 drive = new SwerveDrive2();
 	
@@ -123,14 +123,20 @@ public class SwerveDrive2Test
 	ListenerManager listenerManager;
 	
 	BufferedImage robotBaseIcon;
+	BufferedImage wheelIcon;
 	
 	double wheelbaseRadiusM;
+	double momentOfInertia; // in kgm^2
 	
 	boolean windowOpen;
 	
 	double robotSpeedX = 0, robotSpeedY = 0; // in m/s
 	
 	double robotPositionX = WINDOW_WIDTH_M / 2.0, robotPositionY = WINDOW_HEIGHT_M / 2.0; //in m from top left
+	
+	double robotRotationDegrees = 0; // 0 degrees is up in the window
+	double robotRotationalSpeed = 0; //in deg/s 
+	double netTorque; //in Nm
 	
 	final static int PIXELS_PER_METER = 300;
 
@@ -148,7 +154,9 @@ public class SwerveDrive2Test
         try
 		{
 			robotBaseIcon = ImageIO.read(getClass().getResource("assets/robot-base.png")); //must be square
+			wheelIcon = ImageIO.read(getClass().getResource("assets/wheel.png")); 
 			wheelbaseRadiusM = (robotBaseIcon.getWidth() / 2.0) / PIXELS_PER_METER; 
+			momentOfInertia = 3 * ROBOT_MASS_KG * RobotMath.square(wheelbaseRadiusM) / 2;
 		}
 		catch(IOException e)
 		{
@@ -177,7 +185,7 @@ public class SwerveDrive2Test
         //we want the simulation window for the Joystick, but not the motors
         EmulatorMain.enableGUI = true;
 		
-        listenerManager = new ListenerManager(new Joystick(0), ControllerSimXbox.instance);
+        listenerManager = new ListenerManager(new Joystick(0));
         
         EmulatorMain.enableGUI = false;
         // ----------------------------------------------------
@@ -209,7 +217,7 @@ public class SwerveDrive2Test
 		listenerManager.tick();
 		
 		//update swerve drive class
-		drive.drive(listenerManager.getRawAxis(ControllerSimXbox.JOY1X), -listenerManager.getRawAxis(ControllerSimXbox.JOY1Y), listenerManager.getRawAxis(ControllerSimXbox.JOY2X));		
+		drive.drive(listenerManager.getRawAxis(ControllerSimXbox.JOY1X), -listenerManager.getRawAxis(ControllerSimXbox.JOY1Y), listenerManager.getRawAxis(ControllerSimXbox.SIM_WINDOW_Z));		
 		
 		//update fake swerve modules
 		for(FakeModule module : modules)
@@ -221,27 +229,54 @@ public class SwerveDrive2Test
 		//-----------------------------------
 		double netForceX = 0, netForceY = 0; //in Newtons
 		
+		netTorque = 0; // in Nm
+		
+		//detect wheel direction to motion direction mismatch
+		double motionDirectionDeg;
+		if(robotSpeedX == 0)
+		{
+			motionDirectionDeg = 0;
+		}
+		else	
+		{
+			motionDirectionDeg = RobotMath.rTD(Math.tan(robotSpeedY/robotSpeedX));
+		}
+		
+		double secondsSinceLastTick = ((double)millisSinceLastTick) / 1000;
+		
 		for(FakeModule module : modules)
 		{
-			double driveWheelAngleRad = RobotMath.dTR(module.simulatedHeadingDegrees - 90);
+			double driveWheelAngle = RobotMath.normalizeAngle(module.simulatedAngleDegrees + robotRotationDegrees);
+
+			double driveWheelAngleRad = RobotMath.dTR(driveWheelAngle);
 			
 			netForceX += Math.cos(driveWheelAngleRad) * module.driveWheelForce;
 			netForceY += Math.sin(driveWheelAngleRad) * module.driveWheelForce;
+			
+			//not sure what the actual equation for this is
+			netForceX -= WHEEL_NON_TURNING_FRICTION_FACTOR * robotSpeedX * Math.abs(Math.sin(RobotMath.dTR(Math.abs(driveWheelAngle - motionDirectionDeg))));
+			netForceY -= WHEEL_NON_TURNING_FRICTION_FACTOR * robotSpeedY * Math.abs(Math.sin(RobotMath.dTR(Math.abs(driveWheelAngle - motionDirectionDeg))));
+			
+			netTorque += -1 * Math.sin(driveWheelAngleRad - RobotMath.dTR(module.wheelbaseAngle)) * module.driveWheelForce;
 		}
 		
-		netForceX += -1 * COEFFICIENT_OF_FRICTION * RobotMath.square(robotSpeedX) * RobotMath.sgn(robotSpeedX);
-		netForceY += -1 * COEFFICIENT_OF_FRICTION * RobotMath.square(robotSpeedY) * RobotMath.sgn(robotSpeedY);
-
 		
 		double robotAccelerationX = netForceX / ROBOT_MASS_KG;
 		double robotAccelerationY = netForceY / ROBOT_MASS_KG;
 		
-		double secondsSinceLastTick = ((double)millisSinceLastTick) / 1000;
+		netForceX += -1 * INTERNAL_FRICTION * RobotMath.square(robotSpeedX) * RobotMath.sgn(robotSpeedX);
+		netForceY += -1 * INTERNAL_FRICTION * RobotMath.square(robotSpeedY) * RobotMath.sgn(robotSpeedY);
+		
+		//netTorque += -1 * INTERNAL_ROTATIONAL_FRICTION * RobotMath.square(robotRotationalSpeed) * RobotMath.sgn(robotRotationalSpeed);
 		
 		robotSpeedX += robotAccelerationX * secondsSinceLastTick;
 		robotSpeedY += robotAccelerationY * secondsSinceLastTick;
 		
-		Log.debug("SwerveDrive2Test", "X Acceleration: " + robotAccelerationX + ", Y Acceleration: " + robotAccelerationY);
+		double robotRotationalAcceleration = netTorque / momentOfInertia;
+		robotRotationalSpeed += robotRotationalAcceleration * secondsSinceLastTick;
+		robotRotationDegrees += robotRotationalSpeed * secondsSinceLastTick;
+		
+		//Log.debug("SwerveDrive2Test", "X Acceleration: " + robotAccelerationX + ", Y Acceleration: " + robotAccelerationY);
 		
 		double newPositionX = robotPositionX + robotSpeedX * secondsSinceLastTick;
 		double newPositionY = robotPositionY + robotSpeedY * secondsSinceLastTick;
@@ -265,8 +300,8 @@ public class SwerveDrive2Test
 			robotPositionY = newPositionY;
 		}
 		
-		//detect wheel direction to motion direction mismatch
-		double motionDirectionDeg = RobotMath.rTD(Math.tan(robotSpeedY/robotSpeedX));
+
+
 	}
 	
 	@Ignore
@@ -301,13 +336,25 @@ public class SwerveDrive2Test
 			g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 			
 			//draw robot
+			
+			AffineTransform robotTransform = new AffineTransform();
+			robotTransform.rotate(RobotMath.dTR(robotRotationDegrees), robotCenterPxX, robotCenterPxY);
+			AffineTransform oldTransform = g2d.getTransform();
+			g2d.transform(robotTransform);
+
 			g2d.drawImage(robotBaseIcon, robotCenterPxX - halfRobotWidth, robotCenterPxY - halfRobotHeight, null);
+
+			g2d.setTransform(oldTransform);
 			
 			for(int index = 0; index < modules.size(); ++index)
 			{
 				FakeModule currentModule = modules.get(index);
-				g2d.drawString(String.format("Module %d: Drive Speed (RPM): %f, Heading Offset (deg): %f", index, currentModule.driveWheelSpeed, currentModule.simulatedHeadingDegrees), 0, index * 20);
+				g2d.drawString(String.format("Module %d: Drive Speed (RPM): %f, Heading Offset (deg): %f", index, currentModule.driveWheelSpeed, currentModule.simulatedAngleDegrees + 90), 0, index * 20 + 20);
 			}
+			
+			g2d.drawString("Robot rotation: " + robotRotationDegrees + " deg Net Torque: " + netTorque + " Nm", 0, 80);
+			g2d.drawString("X Speed: " + robotSpeedX + " Y Speed: " + netTorque, 0, 100);
+
 			
 			final int wheelWidth = 25;
 			final int wheelHeight = 6;
@@ -315,24 +362,22 @@ public class SwerveDrive2Test
 			//draw modules
 			for(FakeModule module : modules)
 			{
-				int pixelOffsetX = RobotMath.floor_double_int(wheelbaseRadiusPx * Math.cos(RobotMath.dTR(module.wheelbaseAngle)));
-				int pixelOffsetY = RobotMath.floor_double_int(wheelbaseRadiusPx * Math.sin(RobotMath.dTR(module.wheelbaseAngle)));
-				
-				Rectangle wheelRect = new Rectangle(robotCenterPxX + pixelOffsetX - (wheelWidth/2), robotCenterPxY + pixelOffsetY - (wheelHeight/2), wheelWidth, wheelHeight);
-				
+
+							
 				//from http://stackoverflow.com/questions/8807717/java-rotate-rectangle-around-the-center
 				AffineTransform transform = new AffineTransform();
-				transform.rotate(RobotMath.dTR(module.simulatedHeadingDegrees + 90), robotCenterPxX + pixelOffsetX, robotCenterPxY + pixelOffsetY);
-				AffineTransform old = g2d.getTransform();
+				transform.rotate(RobotMath.dTR(robotRotationDegrees), robotCenterPxX, robotCenterPxY);
+				
+				int pixelOffsetX = RobotMath.floor_double_int(wheelbaseRadiusPx * Math.cos(RobotMath.dTR(module.wheelbaseAngle + robotRotationDegrees)));
+				int pixelOffsetY = RobotMath.floor_double_int(wheelbaseRadiusPx * Math.sin(RobotMath.dTR(module.wheelbaseAngle + robotRotationDegrees)));
+				
+				transform.rotate(RobotMath.dTR(module.simulatedAngleDegrees + robotRotationDegrees), robotCenterPxX + pixelOffsetX, robotCenterPxY + pixelOffsetY);
+				oldTransform = g2d.getTransform();
 				g2d.transform(transform);
 
-				g2d.draw(wheelRect);
+				g2d.drawImage(wheelIcon, robotCenterPxX + pixelOffsetX - (wheelWidth/2), robotCenterPxY + pixelOffsetY - (wheelHeight/2), null);
 				
-				g2d.setColor(Color.WHITE);
-				
-				g2d.fill(wheelRect);
-
-				g2d.setTransform(old);
+				g2d.setTransform(oldTransform);
 			}
 		}
 	}
